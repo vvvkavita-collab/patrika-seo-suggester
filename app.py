@@ -35,12 +35,12 @@ def generate_meta(text: str):
     return meta[:160]
 
 def generate_full_article(text: str):
-    paras = text.split(". ")
-    article = "#### 🟢 इंट्रोडक्शन\n" + " ".join(paras[:2]) + "\n\n"
+    paras = [p.strip() for p in text.split(". ") if len(p.strip()) > 40]
+    article = "#### 🟢 इंट्रोडक्शन\n" + "\n".join(paras[:2]) + "\n\n"
     if len(paras) > 2:
-        article += "#### 🟠 मुख्य बयान\n" + " ".join(paras[2:4]) + "\n\n"
+        article += "#### 🟠 मुख्य बयान\n" + "\n".join(paras[2:4]) + "\n\n"
     if len(paras) > 4:
-        article += "#### 🟣 प्रतिक्रियाएं\n" + " ".join(paras[4:6]) + "\n\n"
+        article += "#### 🟣 प्रतिक्रियाएं\n" + "\n".join(paras[4:6]) + "\n\n"
     article += "#### ⚪ निष्कर्ष\nयह खबर महत्वपूर्ण है और आगे चर्चा का विषय बनेगी।"
     return article
 
@@ -62,7 +62,11 @@ def docx_file(title, meta, article):
     doc.add_heading("Suggested Meta", level=2)
     doc.add_paragraph(meta)
     doc.add_heading("Suggested Full Article", level=2)
-    doc.add_paragraph(article)
+    for line in article.split("\n"):
+        if line.startswith("####"):
+            doc.add_heading(line.replace("####", "").strip(), level=2)
+        elif line.strip():
+            doc.add_paragraph(line.strip())
     bio = io.BytesIO()
     doc.save(bio)
     bio.seek(0)
