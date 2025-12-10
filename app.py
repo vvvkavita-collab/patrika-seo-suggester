@@ -14,33 +14,37 @@ from docx import Document
 def clean_text(txt: str) -> str:
     return " ".join(txt.replace("\n", " ").split())
 
-def extract_keywords(text: str, n=5):
-    words = [w.strip(".,:;!?\"'()[]") for w in text.split()]
-    freq = {}
-    for w in words:
-        if len(w) > 3:
-            freq[w.lower()] = freq.get(w.lower(), 0) + 1
-    sorted_kw = sorted(freq.items(), key=lambda x: -x[1])
-    return [k for k, _ in sorted_kw[:n]]
+def extract_entities(text: str):
+    words = text.split()
+    proper = [w for w in words if w.istitle() and len(w) > 3]
+    return proper[:3]
+
+def extract_action(text: str):
+    actions = ["इनकार", "घोषणा", "लॉन्च", "स्वीकार", "विवाद", "बयान"]
+    for act in actions:
+        if act in text:
+            return act
+    return "बयान"
 
 def generate_title(text: str):
-    kws = extract_keywords(text, n=3)
-    if not kws:
-        return "SEO-अनुकूल शीर्षक"
-    return f"{kws[0].capitalize()} पर बड़ा बयान, {', '.join(kws[1:])} चर्चा में"
+    entities = extract_entities(text)
+    action = extract_action(text)
+    if entities:
+        return f"{entities[0]} ने {action} किया, {', '.join(entities[1:])} चर्चा में"
+    else:
+        return f"ताज़ा खबर: {action} चर्चा में"
 
 def generate_meta(text: str):
-    kws = extract_keywords(text, n=3)
-    meta = f"यह खबर {', '.join(kws)} पर केंद्रित है। इसमें मुख्य बयान और प्रतिक्रियाएं शामिल हैं।"
-    return meta[:160]
+    snippet = text[:160]
+    return f"{snippet}..."
 
 def generate_full_article(text: str):
     paras = [p.strip() for p in text.split(". ") if len(p.strip()) > 40]
-    article = "#### 🟢 इंट्रोडक्शन\n" + "\n".join(paras[:2]) + "\n\n"
+    article = "#### 🟢 इंट्रोडक्शन\n" + " ".join(paras[:2]) + "\n\n"
     if len(paras) > 2:
-        article += "#### 🟠 मुख्य बयान\n" + "\n".join(paras[2:4]) + "\n\n"
+        article += "#### 🟠 मुख्य बयान\n" + " ".join(paras[2:4]) + "\n\n"
     if len(paras) > 4:
-        article += "#### 🟣 प्रतिक्रियाएं\n" + "\n".join(paras[4:6]) + "\n\n"
+        article += "#### 🟣 प्रतिक्रियाएं\n" + " ".join(paras[4:6]) + "\n\n"
     article += "#### ⚪ निष्कर्ष\nयह खबर महत्वपूर्ण है और आगे चर्चा का विषय बनेगी।"
     return article
 
