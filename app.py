@@ -20,7 +20,7 @@ def extract_entities(text: str):
     return proper[:3]
 
 def extract_action(text: str):
-    actions = ["इनकार", "घोषणा", "लॉन्च", "स्वीकार", "विवाद", "बयान"]
+    actions = ["इनकार", "घोषणा", "लॉन्च", "स्वीकार", "विवाद", "बयान", "निवेश", "शुरू"]
     for act in actions:
         if act in text:
             return act
@@ -35,7 +35,7 @@ def generate_title(text: str):
         return f"ताज़ा खबर: {action} चर्चा में"
 
 def generate_meta(text: str):
-    snippet = text[:160]
+    snippet = clean_text(text)[:160]
     return f"{snippet}..."
 
 def generate_full_article(text: str):
