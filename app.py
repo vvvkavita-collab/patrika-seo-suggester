@@ -3,7 +3,13 @@ import requests
 from bs4 import BeautifulSoup
 import re
 from collections import Counter
-from indic_transliteration import sanscript, transliterate
+
+# ------------------- TRANSLITERATION SAFE -------------------
+try:
+    from indic_transliteration import sanscript, transliterate
+    transliteration_available = True
+except ImportError:
+    transliteration_available = False
 
 # --------------------------------------
 # SETUP
@@ -85,7 +91,11 @@ def rewrite_news_manual(raw_text):
     stopwords = ['का','की','के','और','से','है','हैं','में','पर','कि']
     words = re.findall(r'\w+', raw_text)
     slug_words = [w for w in words[:10] if w not in stopwords]
-    slug = '-'.join([transliterate(w, sanscript.DEVANAGARI, sanscript.ITRANS) for w in slug_words])
+
+    if transliteration_available:
+        slug = '-'.join([transliterate(w, sanscript.DEVANAGARI, sanscript.ITRANS) for w in slug_words])
+    else:
+        slug = '-'.join(slug_words)  # fallback
 
     # 6. Keywords (top 6–10 frequent words)
     freq = Counter(words)
