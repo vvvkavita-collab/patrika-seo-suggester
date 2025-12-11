@@ -15,7 +15,7 @@ except ImportError:
 # SETUP
 # --------------------------------------
 st.set_page_config(page_title="Patrika – SEO News Rewriter", layout="wide")
-st.title("📰 Patrika SEO News Rewriter (Hindi) – NO-AI VERSION")
+st.title("📰 Patrika SEO News Rewriter (Hindi) – CLEAN NO-AI VERSION")
 
 # --------------------------------------
 # CLEAN HTML FUNCTION
@@ -44,14 +44,18 @@ def extract_news_from_url(url):
         html = response.text
         clean_text = clean_html(html)
 
-        # Remove author/date/posted on/photo credits patterns
+        # Remove author/date/posted on/photo credits / site info
         patterns = [
             r"Published.*?\d{4}",
             r"Updated.*?\d{4}",
             r"By\s+[A-Za-z ]+",
-            r"\(IANS\)", r"\(ANI\)", r"\(PTI\)",
+            r"\(IANS\)|\(ANI\)|\(PTI\)",
             r"Photo.*?:", r"Image.*?:",
             r"posted\s+by.*",
+            r"2 min read",
+            r"\d{1,2} [A-Za-z]+ \d{4}",
+            r"•\s+\w+",  # site navigation bullets
+            r"पत्रिका|स्पेशल|ई-पेपर|मेरी खबर|शॉर्ट्स|वीडियोज़",  # common site words
         ]
 
         for p in patterns:
@@ -71,21 +75,26 @@ def rewrite_news_manual(raw_text):
     sentences = re.split(r'[।!?]', raw_text)
     sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
 
-    # 2. Group into paragraphs (2 sentences per paragraph)
+    # 2. Group into paragraphs (2–3 sentences per paragraph)
     paragraphs = []
     i = 0
     while i < len(sentences):
-        para = '। '.join(sentences[i:i+2]) + '।'
+        para = '। '.join(sentences[i:i+3]) + '।'
         paragraphs.append(para)
-        i += 2
+        i += 3
         if len(paragraphs) >= 7:
             break
 
-    # 3. SEO Titles (first 3 main sentences)
-    titles = [s[:60] for s in sentences[:3]]
+    # 3. Titles (first 3 meaningful sentences)
+    titles = []
+    for s in sentences[:10]:
+        if len(titles) < 3:
+            clean_title = s.strip()[:80]  # up to 80 chars, no cutoff words
+            titles.append(clean_title)
 
-    # 4. Meta description (140–160 chars)
-    meta = ' '.join(sentences[:3])[:160]
+    # 4. Meta description (first 140–160 chars of cleaned text)
+    meta = ' '.join(sentences[:5])
+    meta = meta[:160].rstrip() + '…' if len(meta) > 160 else meta
 
     # 5. URL Slug (Hindi translit + remove stopwords)
     stopwords = ['का','की','के','और','से','है','हैं','में','पर','कि']
@@ -95,10 +104,11 @@ def rewrite_news_manual(raw_text):
     if transliteration_available:
         slug = '-'.join([transliterate(w, sanscript.DEVANAGARI, sanscript.ITRANS) for w in slug_words])
     else:
-        slug = '-'.join(slug_words)  # fallback
+        slug = '-'.join(slug_words)
 
-    # 6. Keywords (top 6–10 frequent words)
-    freq = Counter(words)
+    # 6. Keywords (top meaningful words, >2 chars, ignore stopwords)
+    words_filtered = [w for w in words if len(w) > 2 and w not in stopwords]
+    freq = Counter(words_filtered)
     keywords = [w for w,_ in freq.most_common(10)]
 
     # 7. Format output
