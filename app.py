@@ -2,18 +2,14 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import re
-from urllib.parse import urlparse
-from openai import OpenAI
+from collections import Counter
+from indic_transliteration import sanscript, transliterate
 
 # --------------------------------------
 # SETUP
 # --------------------------------------
 st.set_page_config(page_title="Patrika – SEO News Rewriter", layout="wide")
-st.title("📰 Patrika SEO News Rewriter (Hindi) – FINAL VERSION")
-
-# Insert your API Key here
-OPENAI_API_KEY = "YOUR_OPENAI_KEY_HERE"
-client = OpenAI(api_key=OPENAI_API_KEY)
+st.title("📰 Patrika SEO News Rewriter (Hindi) – NO-AI VERSION")
 
 # --------------------------------------
 # CLEAN HTML FUNCTION
@@ -62,81 +58,59 @@ def extract_news_from_url(url):
 
 
 # --------------------------------------
-# REWRITE NEWS (PATRIAK SEO ENGINE)
+# MANUAL REWRITE FUNCTION (NO-AI)
+# --------------------------------------
+def rewrite_news_manual(raw_text):
+    # 1. Split into sentences
+    sentences = re.split(r'[।!?]', raw_text)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+
+    # 2. Group into paragraphs (2 sentences per paragraph)
+    paragraphs = []
+    i = 0
+    while i < len(sentences):
+        para = '। '.join(sentences[i:i+2]) + '।'
+        paragraphs.append(para)
+        i += 2
+        if len(paragraphs) >= 7:
+            break
+
+    # 3. SEO Titles (first 3 main sentences)
+    titles = [s[:60] for s in sentences[:3]]
+
+    # 4. Meta description (140–160 chars)
+    meta = ' '.join(sentences[:3])[:160]
+
+    # 5. URL Slug (Hindi translit + remove stopwords)
+    stopwords = ['का','की','के','और','से','है','हैं','में','पर','कि']
+    words = re.findall(r'\w+', raw_text)
+    slug_words = [w for w in words[:10] if w not in stopwords]
+    slug = '-'.join([transliterate(w, sanscript.DEVANAGARI, sanscript.ITRANS) for w in slug_words])
+
+    # 6. Keywords (top 6–10 frequent words)
+    freq = Counter(words)
+    keywords = [w for w,_ in freq.most_common(10)]
+
+    # 7. Format output
+    output = "### Suggested Titles (3 options)\n"
+    for idx, t in enumerate(titles,1):
+        output += f"{idx}. {t}\n"
+
+    output += f"\n### SEO Meta (140–160 chars)\n{meta}\n"
+    output += f"\n### Suggested URL Slug\n{slug}\n"
+    output += f"\n### Suggested Keywords\n{', '.join(keywords)}\n"
+    output += f"\n### Rewritten Full Article\n"
+    for idx, para in enumerate(paragraphs,1):
+        output += f"Paragraph {idx}:\n{para}\n"
+
+    return output
+
+
+# --------------------------------------
+# REWRITE NEWS FUNCTION (No-AI wrapper)
 # --------------------------------------
 def rewrite_news_patrika_style(raw_text):
-    system_prompt = """
-    You are an expert senior news editor for Rajasthan Patrika.
-    Rewrite any given news article in pure Hindi (Patrika newsroom tone)
-    using SEO and Google News guidelines.
-
-    STRICT RULES:
-    ------------------------------------------------
-    ❌ Do NOT include:
-    - author name
-    - date/time
-    - photo credit
-    - agency name (IANS, PTI, ANI)
-    - phrases like "Published on", "Updated", "Photo"
-    - social share lines
-    - notes, bullets
-    - JSON-LD, HTML code, schema
-    - filler lines
-    - Paragraph 8/9/10 if news ends earlier
-
-    ✔ MUST include:
-    ------------------------------------------------
-    - 3 SEO friendly titles (Hindi)
-    - Single 140–160 char meta description
-    - Clean SEO slug (hindi-translit, no stopwords)
-    - 6–10 keywords (topic based only)
-    - 2–3 H2 subheadings (SEO friendly)
-    - Full rewritten article (Hindi Patrika Style)
-    - 5–7 paragraphs (2–3 lines each)
-    - No single-line paragraph allowed
-    - No agency/source/author anywhere
-
-    OUTPUT FORMAT EXACTLY AS BELOW:
-    ------------------------------------------------
-    ### Suggested Titles (3 options)
-    1.
-    2.
-    3.
-
-    ### SEO Meta (140–160 chars)
-
-    ### Suggested URL Slug
-
-    ### Suggested Keywords
-
-    ### Suggested Headings (H2 + 1-line intro)
-
-    ### Rewritten Full Article
-    Paragraph 1:
-    Paragraph 2:
-    Paragraph 3:
-    Paragraph 4:
-    Paragraph 5:
-    Paragraph 6:
-    Paragraph 7: (only if needed)
-    """
-
-    user_prompt = f"""
-    Rewrite the following news article into Patrika Hindi style:
-
-    {raw_text}
-    """
-
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.4,
-    )
-
-    return completion.choices[0].message["content"]
+    return rewrite_news_manual(raw_text)
 
 
 # --------------------------------------
@@ -164,4 +138,4 @@ if st.button("Rewrite News (Patrika Style)"):
 
 # FOOTER
 st.markdown("---")
-st.caption("Rajasthan Patrika – SEO Hindi News Rewriter | Final Optimized Version")
+st.caption("Rajasthan Patrika – SEO Hindi News Rewriter | No-AI Version")
