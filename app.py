@@ -6,11 +6,14 @@ from datetime import datetime
 from collections import Counter
 from text_unidecode import unidecode
 from docx import Document
+import requests
+from bs4 import BeautifulSoup
+import re
 
 # -------------------------------
 # Config
 # -------------------------------
-st.set_page_config(page_title="Patrika SEO Suggester", layout="wide")
+st.set_page_config(page_title="Patrika SEO Suggester - Updated", layout="wide")
 PRIMARY_BRAND = "Rajasthan Patrika"
 DEFAULT_AUTHOR = "Patrika News Desk"
 DEFAULT_SECTION = "National"
@@ -21,7 +24,6 @@ EN_STOPWORDS = set("""
 the a an and or but if then else when while of for to in on at from by with without as is are was were be been being
 """.split())
 
-# Optional internal link map (replace with your real URLs)
 INTERNAL_LINKS = {
     "National": [
         ("Congress News", "https://www.patrika.com/national-news/congress/"),
@@ -35,13 +37,12 @@ INTERNAL_LINKS = {
 }
 
 # -------------------------------
-# Utility functions
+# Utility functions (existing + added)
 # -------------------------------
 def clean_text(txt: str) -> str:
-    return " ".join(txt.replace("\n", " ").split())
+    return " ".join(txt.replace("\r", "").replace("\n", " ").split())
 
 def tokenize(txt: str):
-    # Simple tokenization for Hindi+English mixed content
     tokens = []
     for w in txt.split():
         w = w.strip(".,:;!?'\"()[]{}“”‘’-–—|/\\")
@@ -50,28 +51,24 @@ def tokenize(txt: str):
     return tokens
 
 def is_stopword(w: str) -> bool:
-    # crude stopword check (supports hindi+english)
     return w in EN_STOPWORDS or w in HINDI_STOPWORDS
 
 def top_keywords(text: str, n=6):
     tokens = tokenize(text)
     toks = [t for t in tokens if not is_stopword(t) and t.isalpha()]
     freq = Counter(toks)
-    # avoid over-generic words
     blacklist = {"news", "india", "indian", "said", "statement", "award", "avard", "khabar"}
     filtered = [(k, v) for k, v in freq.items() if k not in blacklist]
     filtered.sort(key=lambda x: (-x[1], x[0]))
     return [k for k, _ in filtered[:n]]
 
 def guess_primary_entity(text: str):
-    # naive guess: pick capitalized words sequence from original text
     words = [w.strip() for w in text.split()]
     caps = []
     for w in words:
         raw = w.strip(".,:;!?'\"()[]{}“”‘’-–—")
-        if len(raw) >= 2 and (raw[0].isupper() or raw[:1].isalpha()):
+        if len(raw) >= 2 and raw[0].isupper():
             caps.append(raw)
-    # prefer known entities if present
     candidates = ["Shashi Tharoor", "Veer Savarkar", "Congress", "BJP", "Rajasthan", "Jaipur", "Delhi"]
     for c in candidates:
         if c.lower() in text.lower():
@@ -84,7 +81,6 @@ def clamp(s: str, max_len: int):
 def generate_title(text: str, max_len=60):
     entity = guess_primary_entity(text)
     kws = top_keywords(text, n=4)
-    # Decide intent from common denial/accept words
     lower = text.lower()
     if any(x in lower for x in ["इनकार", "deny", "decline", "refuse", "नहीं लेंगे", "इंकार"]):
         intent = "लेने से किया इनकार"
@@ -92,12 +88,10 @@ def generate_title(text: str, max_len=60):
         intent = "स्वीकार करने की बात पर बयान"
     else:
         intent = "पर बयान"
-    # Try to bind specific award keyword if present
     if "savarkar" in lower or "सावरकर" in lower:
         subject = "‘Veer Savarkar Award’"
     else:
         subject = "अवॉर्ड"
-
     t = f"{entity} ने {subject} {intent}, आयोजकों की भूमिका पर सवाल"
     return clamp(t, max_len)
 
@@ -113,7 +107,6 @@ def generate_meta(text: str, max_len=160):
     return clamp(meta, max_len)
 
 def slugify(title: str):
-    # minimize unicode while keeping readability; Hindi allowed but we’ll prefer ASCII
     ascii_title = unidecode(title)
     ascii_title = ascii_title.lower()
     allowed = []
@@ -121,10 +114,8 @@ def slugify(title: str):
         if ch.isalnum() or ch in [" ", "-", "_"]:
             allowed.append(ch)
     s = "".join(allowed).replace(" ", "-")
-    # remove repeats and stopwords
     parts = [p for p in s.split("-") if p and p not in EN_STOPWORDS]
     s = "-".join(parts)
-    # keep concise
     return clamp(s, 64)
 
 def image_alts(text: str, count=2):
@@ -139,12 +130,11 @@ def image_alts(text: str, count=2):
     return alts
 
 def readability_notes(text: str):
-    # basic checks
     notes = []
-    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    paragraphs = [p.strip() for p in re.split(r'\n{1,}', text) if p.strip()]
     avg_len = sum(len(p) for p in paragraphs) / max(1, len(paragraphs))
     if avg_len > 500:
-        notes.append("पैराग्राफ छोटे रखें (3–4 लाइन), लंबे पैराग्राफ विभाजित करें।")
+        notes.append("पैराग्राफ छोटे रखें (3–4 लाइन), लंबे पैराग्राफ विभित करें।")
     tokens = tokenize(text)
     if len(tokens) > 800:
         notes.append("इंट्रो छोटा करें और उपशीर्षक (H2/H3) जोड़कर सेक्शन्स बनाएं।")
@@ -164,7 +154,6 @@ def keywords_bundle(text: str):
     if "congress" in lower or "कांग्रेस" in lower:
         primaries.append("Congress MP statement")
     extras = top_keywords(text, n=6)
-    # de-duplicate and clamp
     seen = set()
     result = []
     for k in primaries + extras:
@@ -194,14 +183,13 @@ def scores(title, meta, text):
     sc["Title length"] = (len(title), 50 <= len(title) <= 60)
     sc["Meta length"] = (len(meta), 140 <= len(meta) <= 160)
     sc["Has keywords"] = (len(keywords_bundle(text)) >= 3, True)
-    sc["Has internal links map"] = (True, True)  # map exists; editor must insert final URLs
+    sc["Has internal links map"] = (True, True)
     return sc
 
 def internal_links(section: str):
     return INTERNAL_LINKS.get(section, [])
 
 def html_snippet(title, meta, canonical, json_ld):
-    # Minimal, CMS-pasteable snippet
     return f"""<!-- SEO snippet start -->
 <title>{title}</title>
 <meta name="description" content="{meta}">
@@ -253,124 +241,259 @@ def csv_file_row(article_id, reporter, title, meta, slug, section, score_dict):
     return output
 
 # -------------------------------
+# NEW: fetch article from URL (heuristic)
+# -------------------------------
+def fetch_article_from_url(url):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; PatrikaSEO/1.0)"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.content, "html.parser")
+
+        # try common patterns
+        article_text = ""
+        title = ""
+        # title heuristics
+        if soup.title and soup.title.string:
+            title = soup.title.string.strip()
+        h1 = soup.find("h1")
+        if h1 and h1.get_text(strip=True):
+            title = h1.get_text(strip=True)
+
+        # article body heuristics: <article>, common classes
+        article = soup.find("article")
+        if article:
+            ps = article.find_all("p")
+            article_text = "\n\n".join([p.get_text(" ", strip=True) for p in ps if p.get_text(strip=True)])
+        if not article_text:
+            # try common content containers
+            selectors = [
+                {"name": "div", "attr": {"class": re.compile(r"(article|story|content|post|main)", re.I)}},
+                {"name": "div", "attr": {"id": re.compile(r"(article|story|content|main)", re.I)}},
+            ]
+            for sel in selectors:
+                nodes = soup.find_all(sel["name"], sel["attr"])
+                for n in nodes:
+                    ps = n.find_all("p")
+                    if len(ps) >= 2:
+                        article_text = "\n\n".join([p.get_text(" ", strip=True) for p in ps if p.get_text(strip=True)])
+                        if len(article_text.split()) > 50:
+                            break
+                if article_text:
+                    break
+        if not article_text:
+            # fallback: collect large <p> tags in body
+            ps = soup.body.find_all("p") if soup.body else []
+            article_text = "\n\n".join([p.get_text(" ", strip=True) for p in ps if len(p.get_text(strip=True)) > 30])
+
+        # canonical
+        canonical = None
+        link_can = soup.find("link", {"rel": "canonical"})
+        if link_can and link_can.get("href"):
+            canonical = link_can["href"]
+        else:
+            canonical = url
+
+        return {
+            "title": title or "",
+            "body": article_text or "",
+            "canonical": canonical
+        }
+    except Exception as e:
+        return {"title": "", "body": "", "canonical": url, "error": str(e)}
+
+# -------------------------------
 # UI
 # -------------------------------
-st.title("Patrika SEO Suggester")
-st.caption("Paste news → Get Google/SEO-ready suggestions → Download files (DOCX / JSON-LD / HTML / CSV)")
+st.title("Patrika SEO Suggester — URL & Paste modes")
+st.caption("Mode: Provide published URL(s) OR paste article(s). Outputs follow Google/SEO guidelines. Download DOCX / JSON-LD / HTML / CSV per article.")
 
 with st.sidebar:
     st.header("Settings")
     section = st.selectbox("Article Section", ["National", "Rajasthan", "Business", "Sports", "Entertainment"], index=0)
     author = st.text_input("Author", value=DEFAULT_AUTHOR)
     publisher = st.text_input("Publisher", value=PRIMARY_BRAND)
-    canonical_base = st.text_input("Canonical base URL", value="https://www.patrika.com/")
+    canonical_base = st.text_input("Canonical base URL (used if none found)", value="https://www.patrika.com/")
     img_count = st.slider("Image alt suggestions (count)", 1, 5, 2)
     st.markdown("---")
     st.write("Title/Meta targets:")
     st.write("• Title: 55–60 chars")
     st.write("• Meta: 150–160 chars")
-
-st.subheader("Paste your news article")
-news_text = st.text_area("Paste full body (headline optional).", height=250, placeholder="अपनी खबर यहाँ पेस्ट करें...")
-
-col1, col2 = st.columns([1, 1])
-with col1:
-    article_id = st.text_input("Article ID (optional)", value=f"ART-{datetime.now().strftime('%Y%m%d%H%M')}")
-with col2:
-    reporter = st.text_input("Reporter name (optional)", value="Staff Reporter")
-
-if st.button("Analyze & Suggest", type="primary", disabled=len(news_text.strip()) == 0):
-    body = clean_text(news_text)
-    # Suggestions
-    suggested_title = generate_title(body)
-    suggested_meta = generate_meta(body)
-    suggested_keywords = keywords_bundle(body)
-    suggested_slug = slugify(suggested_title)
-    date_published = datetime.now().strftime("%Y-%m-%dT%H:%M:%S%z")
-    suggested_schema = schema_json_ld(
-        headline=suggested_title,
-        description=suggested_meta,
-        date_published=date_published,
-        author=author,
-        publisher=publisher,
-        section=section,
-        images=None
-    )
-    links = internal_links(section)
-    alts = image_alts(body, count=img_count)
-    notes = readability_notes(body)
-
-    canonical_url = canonical_base.rstrip("/") + "/" + section.lower() + "/" + suggested_slug
-
-    # Scores
-    sc = scores(suggested_title, suggested_meta, body)
-
-    # Layout panels
-    st.success("Suggestions generated. Review and download below.")
-
-    st.markdown("### Suggested Title (as per Google SEO guideline)")
-    st.write(suggested_title)
-    st.markdown("### Suggested Meta (as per Google SEO guideline)")
-    st.write(suggested_meta)
-
-    st.markdown("### Suggested Keywords")
-    st.write(", ".join(suggested_keywords))
-
-    st.markdown("### Suggested URL Slug")
-    st.code(suggested_slug, language="text")
-
-    st.markdown("### Suggested Internal Links")
-    for t, u in links:
-        st.write(f"- {t}: {u}")
-
-    st.markdown("### Suggested Image Alt Text")
-    for alt in alts:
-        st.write(f"- {alt}")
-
-    st.markdown("### NewsArticle JSON-LD")
-    st.code(suggested_schema, language="json")
-
-    st.markdown("### HTML snippet (title, meta, canonical, JSON-LD)")
-    snippet = html_snippet(suggested_title, suggested_meta, canonical_url, suggested_schema)
-    st.code(snippet, language="html")
-
-    st.markdown("### Readability notes")
-    for n in notes:
-        st.write(f"- {n}")
-
     st.markdown("---")
-    st.markdown("### Validation scores")
-    for k, (val, ok) in sc.items():
-        badge = "✅" if ok else "⚠️"
-        st.write(f"- {k}: {val} {badge}")
+    st.write("Multi-article instructions:")
+    st.write("- For URL mode: paste one URL per line.")
+    st.write("- For Paste mode: separate multiple articles with a blank line + `---` + blank line (i.e. `\\n\\n---\\n\\n`).")
 
-    # Downloads
-    st.markdown("---")
-    st.markdown("### Downloads")
+mode = st.radio("Select input mode", ["From URL(s)", "Paste Article(s)"])
 
-    docx_bytes = docx_file(
-        title=suggested_title,
-        meta=suggested_meta,
-        body=body,
-        keywords=suggested_keywords,
-        slug=suggested_slug,
-        schema=suggested_schema,
-        links=links,
-        alts=alts,
-        notes=notes
-    )
-    st.download_button("Download DOCX", data=docx_bytes, file_name=f"{article_id}_seo_suggestions.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+if mode == "From URL(s)":
+    st.subheader("Paste published article URL(s) — one URL per line")
+    urls_input = st.text_area("URLs (one per line)", height=160, placeholder="https://www.example.com/news/123\nhttps://another.example.com/story/abc")
+    if st.button("Fetch & Analyze URLs", disabled=len(urls_input.strip()) == 0):
+        urls = [u.strip() for u in urls_input.splitlines() if u.strip()]
+        if not urls:
+            st.warning("Please paste at least one URL.")
+        else:
+            for idx, url in enumerate(urls, start=1):
+                st.markdown(f"---\n## Article {idx}: `{url}`")
+                with st.spinner(f"Fetching {url} ..."):
+                    fetched = fetch_article_from_url(url)
+                if fetched.get("error"):
+                    st.error(f"Error fetching {url}: {fetched['error']}")
+                    continue
+                body = clean_text(fetched.get("body", ""))
+                fetched_title = fetched.get("title", "").strip()
+                canonical_url = fetched.get("canonical") or (canonical_base.rstrip("/") + "/" + section.lower())
 
-    st.download_button("Download JSON-LD", data=suggested_schema, file_name=f"{article_id}_newsarticle.json", mime="application/ld+json")
+                if not body or len(body.split()) < 30:
+                    st.warning("Unable to extract a full article body from this URL. You can paste the article manually in Paste mode.")
+                    if fetched_title:
+                        st.write("Extracted title (partial):")
+                        st.write(fetched_title)
+                    continue
 
-    st.download_button("Download HTML snippet", data=snippet, file_name=f"{article_id}_seo_snippet.html", mime="text/html")
+                # Process same as paste
+                suggested_title = generate_title(body) if not fetched_title else generate_title(body)  # still generate from body
+                suggested_meta = generate_meta(body)
+                suggested_keywords = keywords_bundle(body)
+                suggested_slug = slugify(suggested_title)
+                date_published = datetime.now().strftime("%Y-%m-%dT%H:%M:%S%z")
+                suggested_schema = schema_json_ld(
+                    headline=suggested_title,
+                    description=suggested_meta,
+                    date_published=date_published,
+                    author=author,
+                    publisher=publisher,
+                    section=section,
+                    images=None
+                )
+                links = internal_links(section)
+                alts = image_alts(body, count=img_count)
+                notes = readability_notes(body)
+                sc = scores(suggested_title, suggested_meta, body)
+                canonical_final = fetched.get("canonical") or (canonical_base.rstrip("/") + "/" + section.lower() + "/" + suggested_slug)
 
-    csv_io = csv_file_row(article_id, reporter, suggested_title, suggested_meta, suggested_slug, section, sc)
-    st.download_button("Download CSV (management)", data=csv_io.getvalue(), file_name=f"{article_id}_summary.csv", mime="text/csv")
+                st.markdown("### Suggested Title")
+                st.write(suggested_title)
+                st.markdown("### Suggested Meta")
+                st.write(suggested_meta)
+                st.markdown("### Suggested Keywords")
+                st.write(", ".join(suggested_keywords))
+                st.markdown("### Suggested URL Slug")
+                st.code(suggested_slug, language="text")
+                st.markdown("### Suggested Image Alt Text")
+                for alt in alts:
+                    st.write(f"- {alt}")
+                st.markdown("### NewsArticle JSON-LD")
+                st.code(suggested_schema, language="json")
+                snippet = html_snippet(suggested_title, suggested_meta, canonical_final, suggested_schema)
+                st.markdown("### HTML snippet")
+                st.code(snippet, language="html")
+                st.markdown("### Readability notes")
+                for n in notes:
+                    st.write(f"- {n}")
+                st.markdown("### Validation scores")
+                for k, (val, ok) in sc.items():
+                    badge = "✅" if ok else "⚠️"
+                    st.write(f"- {k}: {val} {badge}")
 
-else:
-    st.info("खबर पेस्ट करें और ‘Analyze & Suggest’ पर क्लिक करें।")
+                # Downloads
+                article_id = f"URLART-{datetime.now().strftime('%Y%m%d%H%M%S')}-{idx}"
+                docx_bytes = docx_file(
+                    title=suggested_title,
+                    meta=suggested_meta,
+                    body=body,
+                    keywords=suggested_keywords,
+                    slug=suggested_slug,
+                    schema=suggested_schema,
+                    links=links,
+                    alts=alts,
+                    notes=notes
+                )
+                st.download_button("Download DOCX", data=docx_bytes, file_name=f"{article_id}_seo_suggestions.docx",
+                                   mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                st.download_button("Download JSON-LD", data=suggested_schema, file_name=f"{article_id}_newsarticle.json", mime="application/ld+json")
+                st.download_button("Download HTML snippet", data=snippet, file_name=f"{article_id}_seo_snippet.html", mime="text/html")
+                csv_io = csv_file_row(article_id, author, suggested_title, suggested_meta, suggested_slug, section, sc)
+                st.download_button("Download CSV (management)", data=csv_io.getvalue(), file_name=f"{article_id}_summary.csv", mime="text/csv")
+
+elif mode == "Paste Article(s)":
+    st.subheader("Paste your news article(s)")
+    st.info("If multiple articles: separate them with a blank line + --- + blank line (i.e. \\n\\n---\\n\\n).")
+    news_text = st.text_area("Paste full body (headline optional).", height=300, placeholder="अपनी खबर यहाँ पेस्ट करें...\n\n---\n\n(Next article)")
+    if st.button("Analyze & Suggest (Paste mode)", disabled=len(news_text.strip()) == 0):
+        # split into articles
+        parts = [p.strip() for p in re.split(r'\n{0,}\-{3,}\n{0,}', news_text) if p.strip()]
+        if not parts:
+            st.warning("कोई आर्टिकल नहीं मिला—कृपया सही फॉर्मैट में पेस्ट करें।")
+        else:
+            for idx, part in enumerate(parts, start=1):
+                st.markdown(f"---\n## Pasted Article {idx}")
+                body = clean_text(part)
+                suggested_title = generate_title(body)
+                suggested_meta = generate_meta(body)
+                suggested_keywords = keywords_bundle(body)
+                suggested_slug = slugify(suggested_title)
+                date_published = datetime.now().strftime("%Y-%m-%dT%H:%M:%S%z")
+                suggested_schema = schema_json_ld(
+                    headline=suggested_title,
+                    description=suggested_meta,
+                    date_published=date_published,
+                    author=author,
+                    publisher=publisher,
+                    section=section,
+                    images=None
+                )
+                links = internal_links(section)
+                alts = image_alts(body, count=img_count)
+                notes = readability_notes(body)
+                sc = scores(suggested_title, suggested_meta, body)
+                canonical_final = canonical_base.rstrip("/") + "/" + section.lower() + "/" + suggested_slug
+
+                st.markdown("### Suggested Title")
+                st.write(suggested_title)
+                st.markdown("### Suggested Meta")
+                st.write(suggested_meta)
+                st.markdown("### Suggested Keywords")
+                st.write(", ".join(suggested_keywords))
+                st.markdown("### Suggested URL Slug")
+                st.code(suggested_slug, language="text")
+                st.markdown("### Suggested Image Alt Text")
+                for alt in alts:
+                    st.write(f"- {alt}")
+                st.markdown("### NewsArticle JSON-LD")
+                st.code(suggested_schema, language="json")
+                snippet = html_snippet(suggested_title, suggested_meta, canonical_final, suggested_schema)
+                st.markdown("### HTML snippet")
+                st.code(snippet, language="html")
+                st.markdown("### Readability notes")
+                for n in notes:
+                    st.write(f"- {n}")
+                st.markdown("### Validation scores")
+                for k, (val, ok) in sc.items():
+                    badge = "✅" if ok else "⚠️"
+                    st.write(f"- {k}: {val} {badge}")
+
+                # Downloads
+                article_id = f"PASTEART-{datetime.now().strftime('%Y%m%d%H%M%S')}-{idx}"
+                docx_bytes = docx_file(
+                    title=suggested_title,
+                    meta=suggested_meta,
+                    body=body,
+                    keywords=suggested_keywords,
+                    slug=suggested_slug,
+                    schema=suggested_schema,
+                    links=links,
+                    alts=alts,
+                    notes=notes
+                )
+                st.download_button("Download DOCX", data=docx_bytes, file_name=f"{article_id}_seo_suggestions.docx",
+                                   mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                st.download_button("Download JSON-LD", data=suggested_schema, file_name=f"{article_id}_newsarticle.json", mime="application/ld+json")
+                st.download_button("Download HTML snippet", data=snippet, file_name=f"{article_id}_seo_snippet.html", mime="text/html")
+                csv_io = csv_file_row(article_id, author, suggested_title, suggested_meta, suggested_slug, section, sc)
+                st.download_button("Download CSV (management)", data=csv_io.getvalue(), file_name=f"{article_id}_summary.csv", mime="text/csv")
 
 # Footer
 st.markdown("---")
-st.caption("Outputs are heuristic and human-friendly. Editor should review before publishing.")
+st.caption("Outputs are heuristic and human-friendly. Editor should review before publishing. If extraction from URL fails, paste article in Paste mode for best results.")
