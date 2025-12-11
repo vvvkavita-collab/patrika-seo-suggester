@@ -373,4 +373,4 @@ else:
 
 # Footer
 st.markdown("---")
-st.caption("Outputs are heuristic and human-friendly. Editor should review before pu
+st.caption("Outputs are heuristic and human-friendly. Editor should review before publishing.")
